@@ -43,10 +43,51 @@ let
         #datetime(1970,1,1,0,0,0) + ([startTime]/1000)/86400, type datetime),
 
     // Duration in minutes
-    Duration = Table.AddColumn(StartDate, "DurationMinutes", each 
-        if [endTime] <> null then Number.Round(([endTime]-[startTime]) / 60000, 1) else null, type nullable number),
+let
+    // Load JSON file (adjust path or replace with Web.Contents if calling API)
+    Source = Json.Document(File.Contents("C:\Users\YourName\Downloads\response.json")),
 
-    // Keep only the columns you want
-    Final = Table.SelectColumns(Duration, {"id","title","Impacted","Affected","RootCause","StartDate","DurationMinutes"})
+    // Drill into problems array
+    Problems = Source[problems],
+
+    // Convert to table
+    ProblemsTable = Table.FromList(Problems, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    ExpandedProblems = Table.ExpandRecordColumn(
+        ProblemsTable,
+        "Column1",
+        {"problemId", "displayId", "title", "status", "startTime", "endTime", "impactedEntities", "managementZones"}
+    ),
+
+    // Expand impactedEntities
+    ExpandImpactedEntities = Table.ExpandListColumn(ExpandedProblems, "impactedEntities"),
+    ExpandImpactedEntityDetails = Table.ExpandRecordColumn(
+        ExpandImpactedEntities,
+        "impactedEntities",
+        {"name"},
+        {"impactedEntityName"}
+    ),
+
+    // Expand managementZones
+    ExpandZones = Table.ExpandListColumn(ExpandImpactedEntityDetails, "managementZones"),
+    ExpandZoneDetails = Table.ExpandRecordColumn(
+        ExpandZones,
+        "managementZones",
+        {"name"},
+        {"managementZoneName"}
+    ),
+
+    // Convert epoch to datetime (start & end)
+    AddStartDate = Table.TransformColumns(
+        ExpandZoneDetails,
+        {{"startTime", each #datetime(1970,1,1,0,0,0) + #duration(0,0,0, Number.Round(_ / 1000)), type datetime}}
+    ),
+    AddEndDate = Table.TransformColumns(
+        AddStartDate,
+        {{"endTime", each #datetime(1970,1,1,0,0,0) + #duration(0,0,0, Number.Round(_ / 1000)), type datetime}}
+    ),
+
+    // Calculate duration in minutes
+    AddDurationMinutes = Table.AddColumn(AddEndDate, "DurationMinutes", each Duration.TotalMinutes([endTime] - [startTime]), type number)
+
 in
-    Final
+    AddDurationMinutes
